@@ -76,7 +76,395 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print diagnostic info about detection and command selection",
     )
 
+    config_p = sub.add_parser("config", help="View and edit configuration")
+    config_p.add_argument("--tui", action="store_true", help="Open TUI config editor")
+    config_sub = config_p.add_subparsers(dest="config_cmd")
+
+    config_sub.add_parser("show", help="Show all config values with defaults")
+
+    get_p = config_sub.add_parser("get", help="Get a config value")
+    get_p.add_argument("key", help="Dotted config key (e.g. trace.threshold_secs)")
+
+    set_p = config_sub.add_parser("set", help="Set a config value in user config")
+    set_p.add_argument("key", help="Dotted config key")
+    set_p.add_argument("value", nargs="+", help="Value to set")
+    set_p.add_argument(
+        "--append",
+        action="store_true",
+        help="For list keys, append to existing values instead of replacing",
+    )
+
+    reset_p = config_sub.add_parser("reset", help="Reset a config key to default")
+    reset_p.add_argument("key", help="Dotted config key to reset")
+
+    # --- backup / archive / restore / list-backups ---
+    backup_p = sub.add_parser("backup", help="Back up discovered startup files to a tar.gz archive")
+    backup_p.add_argument("--family", help="Shell family (bash, zsh, tcsh)")
+    backup_p.add_argument(
+        "--include", action="append", default=[], help="Include files matching pattern (repeatable)"
+    )
+    backup_p.add_argument(
+        "--exclude", action="append", default=[], help="Exclude files matching pattern (repeatable)"
+    )
+    backup_p.add_argument("--tui", action="store_true", help="Interactive file selection TUI")
+
+    archive_p = sub.add_parser("archive", help="Back up startup files and remove originals")
+    archive_p.add_argument("--family", help="Shell family (bash, zsh, tcsh)")
+    archive_p.add_argument(
+        "--include", action="append", default=[], help="Include files matching pattern (repeatable)"
+    )
+    archive_p.add_argument(
+        "--exclude", action="append", default=[], help="Exclude files matching pattern (repeatable)"
+    )
+    archive_p.add_argument(
+        "--yes", action="store_true", help="Skip confirmation before removing originals"
+    )
+    archive_p.add_argument("--tui", action="store_true", help="Interactive file selection TUI")
+
+    restore_p = sub.add_parser("restore", help="Restore files from a backup archive")
+    restore_p.add_argument(
+        "--archive",
+        dest="archive_substring",
+        help="Substring to match archive (default: most recent)",
+    )
+    restore_p.add_argument(
+        "--include", action="append", default=[], help="Include files matching pattern (repeatable)"
+    )
+    restore_p.add_argument(
+        "--exclude", action="append", default=[], help="Exclude files matching pattern (repeatable)"
+    )
+    restore_p.add_argument(
+        "--force", action="store_true", help="Overwrite existing files (default: skip)"
+    )
+    restore_p.add_argument("--yes", action="store_true", help="Skip confirmation prompt")
+    restore_p.add_argument(
+        "--tui", action="store_true", help="Interactive archive/file selection TUI"
+    )
+
+    sub.add_parser("list-backups", help="List available backup archives")
+
     return p
+
+
+def _validate_config_key(key: str) -> bool:
+    """Check *key* is in the schema, printing an error if not.
+
+    Returns True when valid, False (with stderr output) when invalid.
+    """
+    from .config import CONFIG_SCHEMA
+
+    if key in CONFIG_SCHEMA:
+        return True
+    print(f"error: unknown config key '{key}'", file=sys.stderr)
+    print(f"valid keys: {', '.join(sorted(CONFIG_SCHEMA))}", file=sys.stderr)
+    return False
+
+
+def _handle_config_show() -> int:
+    """Print all config keys with their merged values."""
+    from .config import CONFIG_SCHEMA, config_show
+
+    values = config_show()
+    for key in sorted(values):
+        meta = CONFIG_SCHEMA[key]
+        print(f"{key} = {values[key]!r}  # {meta.description}")
+    return 0
+
+
+def _handle_config_get(key: str) -> int:
+    """Print the merged value for a single key."""
+    from .config import config_get
+
+    if not _validate_config_key(key):
+        return 1
+    print(repr(config_get(key)))
+    return 0
+
+
+def _handle_config_set(key: str, raw_values: list[str], append: bool) -> int:
+    """Set a config value in the user config file."""
+    from .config import CONFIG_SCHEMA, coerce_value, config_set
+
+    if not _validate_config_key(key):
+        return 1
+    meta = CONFIG_SCHEMA[key]
+    try:
+        if meta.value_type == "list_of_strings":
+            _handle_config_set_list(key, raw_values, append)
+        else:
+            val = coerce_value(" ".join(raw_values), meta.value_type)
+            config_set(key, val)
+    except (ValueError, KeyError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def _handle_config_set_list(key: str, raw_items: list[str], append: bool) -> None:
+    """Set or append a list-of-strings config key."""
+    from .config import (
+        config_set,
+        get_nested,
+        load_config,
+        save_config,
+        set_nested,
+        user_config_path,
+    )
+
+    if append:
+        user_cfg = load_config(user_config_path())
+        existing = get_nested(user_cfg, key)
+        if not isinstance(existing, list):
+            existing = []
+        existing.extend(raw_items)
+        set_nested(user_cfg, key, existing)
+        save_config(user_config_path(), user_cfg)
+    else:
+        config_set(key, raw_items)
+
+
+def _handle_config_reset(key: str) -> int:
+    """Remove a key from the user config (reverts to default)."""
+    from .config import config_reset
+
+    if not _validate_config_key(key):
+        return 1
+    config_reset(key)
+    return 0
+
+
+def _handle_config(args: argparse.Namespace) -> int:
+    """Dispatch ``config`` sub-subcommands (show/get/set/reset/--tui)."""
+    if getattr(args, "tui", False):
+        try:
+            from .tui import display_config_tui
+
+            display_config_tui()
+            return 0
+        except Exception as exc:
+            print(f"TUI failed: {exc}", file=sys.stderr)
+            return 1
+
+    config_cmd = getattr(args, "config_cmd", None)
+    if config_cmd == "show":
+        return _handle_config_show()
+    if config_cmd == "get":
+        return _handle_config_get(args.key)
+    if config_cmd == "set":
+        return _handle_config_set(args.key, args.value, getattr(args, "append", False))
+    if config_cmd == "reset":
+        return _handle_config_reset(args.key)
+
+    print("usage: env-config config {show,get,set,reset} ...", file=sys.stderr)
+    return 1
+
+
+def _resolve_family(args: argparse.Namespace) -> str:
+    """Detect and normalize the shell family from CLI args or auto-detection."""
+    family = getattr(args, "family", None)
+    if not family:
+        info = detect_current_and_intended_shell()
+        family = info.get("intended_family")
+    if isinstance(family, str):
+        family = family.lower()
+    return family or "bash"
+
+
+def _discover_files(family: str) -> list[str]:
+    """Discover existing startup files for *family* as absolute paths."""
+    from .discover import discover_startup_files
+
+    return discover_startup_files(family, existing_only=True, full_paths=True)
+
+
+_ALL_FAMILIES = ("bash", "zsh", "tcsh")
+
+
+def _discover_all_families(
+    include: list[str] | None = None,
+    exclude: list[str] | None = None,
+) -> list[tuple[str, list[str]]]:
+    """Discover existing startup files for all shell families.
+
+    Parameters
+    ----------
+    include : list[str] or None
+        If set, only keep files matching these fnmatch patterns.
+    exclude : list[str] or None
+        Remove files matching these fnmatch patterns.
+
+    Returns
+    -------
+    list[tuple[str, list[str]]]
+        Each entry is ``(family, [absolute_paths])``.  Only families
+        with at least one file are included.
+    """
+    from .backup import filter_files
+
+    seen: set[str] = set()
+    groups: list[tuple[str, list[str]]] = []
+    for fam in _ALL_FAMILIES:
+        raw = _discover_files(fam)
+        raw = filter_files(raw, include=include, exclude=exclude)
+        # Deduplicate across families (e.g. .profile appears in both bash and zsh)
+        unique = [f for f in raw if f not in seen]
+        seen.update(unique)
+        if unique:
+            groups.append((fam, unique))
+    return groups
+
+
+def _handle_backup(args: argparse.Namespace) -> int:
+    """Handle the ``backup`` subcommand."""
+    from .backup import create_backup, filter_files
+
+    family = _resolve_family(args)
+    inc = args.include or None
+    exc = args.exclude or None
+
+    if getattr(args, "tui", False):
+        try:
+            from .tui import display_backup_tui
+
+            groups = _discover_all_families(include=inc, exclude=exc)
+            if not groups:
+                print("no startup files found to back up")
+                return 0
+            result = display_backup_tui(groups, family, archive_mode=False)
+            if result:
+                print(f"archive created: {result}")
+            return 0
+        except Exception as exc_tui:
+            print(f"TUI failed: {exc_tui}", file=sys.stderr)
+            return 1
+
+    files = _discover_files(family)
+    files = filter_files(files, include=inc, exclude=exc)
+    if not files:
+        print("no startup files found to back up")
+        return 0
+    print(f"backing up {len(files)} file(s):")
+    for f in files:
+        print(f"  {f}")
+    archive_path = create_backup(files, family)
+    print(f"archive created: {archive_path}")
+    return 0
+
+
+def _handle_archive(args: argparse.Namespace) -> int:
+    """Handle the ``archive`` subcommand (backup + delete)."""
+    from .backup import create_archive, filter_files
+
+    family = _resolve_family(args)
+    inc = args.include or None
+    exc = args.exclude or None
+
+    if getattr(args, "tui", False):
+        try:
+            from .tui import display_backup_tui
+
+            groups = _discover_all_families(include=inc, exclude=exc)
+            if not groups:
+                print("no startup files found to archive")
+                return 0
+            result = display_backup_tui(groups, family, archive_mode=True)
+            if result:
+                print(f"archive created: {result}")
+            return 0
+        except Exception as exc_tui:
+            print(f"TUI failed: {exc_tui}", file=sys.stderr)
+            return 1
+
+    files = _discover_files(family)
+    files = filter_files(files, include=inc, exclude=exc)
+
+    print(f"will back up and remove {len(files)} file(s):")
+    for f in files:
+        print(f"  {f}")
+    if not getattr(args, "yes", False):
+        answer = input("Proceed? [y/N] ").strip().lower()
+        if answer != "y":
+            print("cancelled")
+            return 1
+    archive_path = create_archive(files, family)
+    print(f"archive created: {archive_path}")
+    return 0
+
+
+def _handle_restore(args: argparse.Namespace) -> int:
+    """Handle the ``restore`` subcommand."""
+    if getattr(args, "tui", False):
+        try:
+            from .tui import display_restore_tui
+
+            restored = display_restore_tui()
+            if restored:
+                print(f"restored {len(restored)} file(s)")
+            return 0
+        except Exception as exc:
+            print(f"TUI failed: {exc}", file=sys.stderr)
+            return 1
+
+    from .backup import find_archive, list_archives, read_manifest, restore_from_archive
+
+    substring = getattr(args, "archive_substring", None)
+    if substring:
+        try:
+            archive_path = find_archive(substring)
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        if archive_path is None:
+            print(f"error: no archive matching '{substring}'", file=sys.stderr)
+            return 1
+    else:
+        archives = list_archives()
+        if not archives:
+            print("error: no backup archives found", file=sys.stderr)
+            return 1
+        archive_path = archives[0][1]
+
+    manifest = read_manifest(archive_path)
+    print(f"archive: {archive_path.name}  ({manifest.timestamp})")
+    print(f"files ({len(manifest.files)}):")
+    for f in manifest.files:
+        print(f"  {f}")
+
+    force = getattr(args, "force", False)
+    if not getattr(args, "yes", False):
+        action = "restore (overwrite existing)" if force else "restore (skip existing)"
+        answer = input(f"{action}? [y/N] ").strip().lower()
+        if answer != "y":
+            print("cancelled")
+            return 1
+
+    restored = restore_from_archive(
+        archive_path,
+        include=args.include or None,
+        exclude=args.exclude or None,
+        force=force,
+    )
+    print(f"restored {len(restored)} file(s)")
+    return 0
+
+
+def _handle_list_backups() -> int:
+    """Handle the ``list-backups`` subcommand."""
+    from .backup import list_archives, read_manifest
+
+    archives = list_archives()
+    if not archives:
+        print("no backup archives found")
+        return 0
+    for timestamp, path in archives:
+        try:
+            manifest = read_manifest(path)
+            file_count = len(manifest.files)
+            file_list = ", ".join(manifest.files)
+            print(f"{timestamp}  ({file_count} files)  {file_list}")
+        except Exception:
+            print(f"{timestamp}  {path.name}  (manifest unreadable)")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -240,9 +628,26 @@ def main(argv: list[str] | None = None) -> int:
             )
         return 0
 
+    if args.cmd == "config":
+        return _handle_config(args)
+
+    if args.cmd == "backup":
+        return _handle_backup(args)
+    if args.cmd == "archive":
+        return _handle_archive(args)
+    if args.cmd == "restore":
+        return _handle_restore(args)
+    if args.cmd == "list-backups":
+        return _handle_list_backups()
+
     parser.print_help()
     return 0
 
 
-if __name__ == "__main__":
+def _entry() -> None:
+    """Console-script entry point (wraps exit code)."""
     raise SystemExit(main())
+
+
+if __name__ == "__main__":
+    _entry()

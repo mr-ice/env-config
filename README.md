@@ -41,6 +41,8 @@ env-config discover --refresh-cache
 - `ENVCONFIG_USE_SHELL_TRACE`: set to `1`, `true`, or `yes` to force the
   shell-level tracer instead of system tracers like `strace`.
 - `ENVCONFIG_CACHE_DIR`: overrides the cache directory used by discovery.
+- `ENVCONFIG_BACKUP_DIR`: overrides the backup archive directory
+  (default `~/.cache/env-config/backups`).
 
 ## CLI highlights
 
@@ -53,6 +55,14 @@ env-config discover --refresh-cache
   `--family`, `--shell-path`, `--mode`, `--dry-run`, `--output-file`,
   `--threshold-secs`, `--threshold-percent`, `--tui`. Core tracing/parsing is in
   [src/env_config/trace.py](src/env_config/trace.py).
+- `backup` — back up discovered startup files to a tar.gz archive. Flags:
+  `--family`, `--include`, `--exclude`, `--tui`.
+- `archive` — back up startup files and remove originals. Flags:
+  `--family`, `--include`, `--exclude`, `--yes`, `--tui`.
+- `restore` — restore files from a backup archive. Flags:
+  `--archive`, `--include`, `--exclude`, `--force`, `--yes`, `--tui`.
+- `list-backups` — list available backup archives with timestamps and
+  file contents.
 
 ## Testing
 
@@ -79,14 +89,10 @@ discovery/trace code paths using these fixtures set `ENVCONFIG_MOCK_TRACE_DIR`.
   can be overridden with `ENVCONFIG_CACHE_DIR`.
 - TUI: a simple curses UI lives in `src/env_config/tui.py`.
 
-If you'd like, I can expand the README with examples showing how to use the
-TUI interactively and a recommended workflow for safely creating and testing
-custom startup scripts.
 # env-config
 
-env-config is a developer/operator tool to inspect and manage shell
-startup files (login/profile/rc files), back them up, and initialize
-user environments from a repository.
+env-config is a tool to manage shell
+startup files (login/profile/rc files), back them up, and include curated startup files from directories given in the config.
 
 Current implemented features (prototype)
 
@@ -113,21 +119,124 @@ Current implemented features (prototype)
   - `--output-file` saves raw trace output for inspection.
   - `--tui` opens a minimal curses UI to inspect flagged files.
 
-Configuration
+## Configuration
 
-Global config: `/etc/env-config.json` (optional)
-User config: `~/.env-config.json` (optional)
+Global config: `/etc/env-config.toml` (optional)
+User config: `~/.env-config.toml` (optional)
 
 Config keys of interest (example):
 
-```json
-{
-  "trace": { "threshold_secs": 0.05, "threshold_percent": 10.0 },
-  "tui": { "page_size": 20 }
-}
+```toml
+[trace]
+threshold_secs = 0.5
+threshold_percent = 10.0
+
+[tui]
+page_size = 20
 ```
 
-The CLI merges global and user configs; user values override global ones.
+User level config overrides global ones.
+
+### CLI config commands
+
+View all config keys and their current (merged) values:
+
+```bash
+env-config config show
+```
+
+Get a single key:
+
+```bash
+env-config config get tui.page_size
+# 20
+
+env-config config get trace.threshold_secs
+# None
+```
+
+Set a value in the user config (`~/.env-config.toml`):
+
+```bash
+# integer
+env-config config set tui.page_size 50
+
+# float
+env-config config set trace.threshold_secs 0.05
+
+# string
+env-config config set repo.url https://example.com/dotfiles.git
+
+# clear a nullable key back to null
+env-config config set trace.threshold_secs null
+
+# list of strings (space-separated)
+env-config config set curated.paths /opt/shell-extras /usr/local/etc/env
+
+# append to an existing list instead of replacing it
+env-config config set curated.paths /another/path --append
+```
+
+Reset a key (removes it from the user config, reverting to the
+global or default value):
+
+```bash
+env-config config reset tui.page_size
+```
+
+Open the user config in `$EDITOR` with live validation (invalid
+edits are reverted automatically):
+
+```bash
+env-config config --tui
+```
+
+## Backup, archive, and restore
+
+Back up discovered startup files to a tar.gz archive:
+
+```bash
+env-config backup
+env-config backup --family zsh
+env-config backup --include ".zshrc" --include ".zprofile"
+env-config backup --exclude ".bash*"
+```
+
+Archive (backup + delete originals) — prompts for confirmation unless
+`--yes` is passed:
+
+```bash
+env-config archive --family bash
+env-config archive --family bash --yes
+```
+
+List available backup archives:
+
+```bash
+env-config list-backups
+```
+
+Restore from the most recent archive (skips existing files by default):
+
+```bash
+env-config restore
+env-config restore --force          # overwrite existing files
+env-config restore --archive 20260215   # match archive by substring
+env-config restore --include ".zshrc" --exclude ".zprofile"
+env-config restore --yes --force    # no confirmation, overwrite
+```
+
+Use `--tui` for interactive file selection (shows all shell families,
+active family highlighted and pre-checked):
+
+```bash
+env-config backup --tui
+env-config archive --tui
+env-config restore --tui
+```
+
+Archives are stored in `~/.cache/env-config/backups/` by default.
+Override with the `ENVCONFIG_BACKUP_DIR` environment variable.
 
 Safety and notes
 
@@ -171,6 +280,5 @@ PYTHONPATH=src python -m env_config.cli trace --family zsh --mode login_noninter
 
 Next features to implement
 
-- Backup/archive/restore and repo init/install.
-- Full TUI workflow for backup/restore and file selection.
+- Repo init/install for curated startup files.
 - Additional shell-family improvements and safer tracer mocks for CI.

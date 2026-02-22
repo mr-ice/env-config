@@ -1,4 +1,20 @@
-"""Simple curses-based TUI for presenting trace analysis results."""
+"""Simple curses-based TUI for presenting trace analysis and config editing.
+
+Public Functions
+----------------
+display_trace_tui(analysis)
+    Show trace analysis in a scrollable curses view.
+display_discovery_tui(modes)
+    Show per-mode discovery results.
+display_config_tui()
+    Interactive config key/value editor.
+validate_editor_config(path)
+    Validate a TOML config file on disk; returns a list of error strings.
+display_backup_tui(files, family, archive_mode)
+    Interactive file selection for backup/archive operations.
+display_restore_tui(backup_dir)
+    Interactive archive browser and file restore.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +22,8 @@ import curses
 import os
 import shutil
 import subprocess
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -37,7 +54,7 @@ def backup_file(path: str) -> bool:
             or Path.home() / ".cache" / "env-config" / "backups"
         )
         backup_dir.mkdir(parents=True, exist_ok=True)
-        ts = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+        ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         dest = backup_dir / f"{ts}_{p.name}"
         shutil.copy2(str(p), str(dest))
         return True
@@ -306,5 +323,939 @@ def display_discovery_tui(modes: dict[str, list[str]]) -> None:
                             except Exception:
                                 _status("Disable failed")
             draw()
+
+    curses.wrapper(_wrapper)
+
+
+# ---------------------------------------------------------------------------
+# Checklist (checkbox multi-select) — reusable component
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ChecklistState:
+    """State for a checkbox multi-select list.
+
+    Attributes
+    ----------
+    items : list[str]
+        Display labels for each item.
+    checked : list[bool]
+        Whether each item is selected.
+    selected : int
+        Cursor position.
+    top : int
+        First visible item index (for scrolling).
+    """
+
+    items: list[str]
+    checked: list[bool]
+    selected: int = 0
+    top: int = 0
+
+
+def _checklist_nav(ch: int, state: ChecklistState, display_lines: int) -> ChecklistState:
+    """Process a keypress for checklist navigation.
+
+    Handles Up/Down/j/k movement, Space to toggle the selected item,
+    ``a`` to select all, and ``n`` to deselect all.
+
+    Parameters
+    ----------
+    ch : int
+        Character code from ``stdscr.getch()``.
+    state : ChecklistState
+        Current checklist state (mutated in place).
+    display_lines : int
+        Number of visible rows for scrolling calculations.
+
+    Returns
+    -------
+    ChecklistState
+        The same *state* object, returned for convenience.
+    """
+    n = len(state.items)
+    if ch in (curses.KEY_DOWN, ord("j")) and state.selected < n - 1:
+        state.selected += 1
+        if state.selected >= state.top + display_lines:
+            state.top += 1
+    elif ch in (curses.KEY_UP, ord("k")) and state.selected > 0:
+        state.selected -= 1
+        if state.selected < state.top:
+            state.top = max(0, state.top - 1)
+    elif ch == ord(" ") and 0 <= state.selected < n:
+        state.checked[state.selected] = not state.checked[state.selected]
+    elif ch in (ord("a"), ord("A")):
+        state.checked = [True] * n
+    elif ch in (ord("n"), ord("N")):
+        state.checked = [False] * n
+    return state
+
+
+def _draw_checklist(
+    stdscr,
+    state: ChecklistState,
+    title: str,
+    subtitle: str,
+    footer: str,
+    extra_lines: list[str] | None = None,
+) -> None:
+    """Render a checkbox list with ``[x]``/``[ ]`` markers.
+
+    Parameters
+    ----------
+    stdscr
+        Curses window.
+    state : ChecklistState
+        Current checklist state.
+    title : str
+        First header line.
+    subtitle : str
+        Second header line (controls hint).
+    footer : str
+        Bottom status bar text.
+    extra_lines : list[str] or None
+        Additional info lines shown between subtitle and the list.
+    """
+    stdscr.clear()
+    stdscr.border()
+    h, w = stdscr.getmaxyx()
+    try:
+        stdscr.addstr(1, 2, title[: w - 4])
+        stdscr.addstr(2, 2, subtitle[: w - 4])
+    except curses.error:
+        pass
+
+    info_y = 4
+    if extra_lines:
+        for i, line in enumerate(extra_lines):
+            try:
+                stdscr.addstr(info_y + i, 2, line[: w - 4])
+            except curses.error:
+                pass
+        info_y += len(extra_lines) + 1
+
+    header_y = info_y
+    display_lines = h - (header_y + 3)
+    for i in range(max(0, display_lines)):
+        idx = state.top + i
+        y = header_y + i
+        if idx >= len(state.items):
+            break
+        mark = "[x]" if state.checked[idx] else "[ ]"
+        label = state.items[idx]
+        line = f"{mark} {label}"
+        line = line[: w - 4]
+        try:
+            attr = curses.A_REVERSE if idx == state.selected else 0
+            stdscr.addstr(y, 2, line, attr)
+        except curses.error:
+            pass
+
+    try:
+        stdscr.addstr(h - 2, 2, footer[: w - 4])
+    except curses.error:
+        pass
+    stdscr.refresh()
+
+
+# ---------------------------------------------------------------------------
+# Backup / Archive TUI
+# ---------------------------------------------------------------------------
+
+
+def _prepare_backup(files: list[str], checked: list[bool]) -> list[str]:
+    """Return the subset of *files* where the corresponding entry is checked.
+
+    Parameters
+    ----------
+    files : list[str]
+        All candidate file paths.
+    checked : list[bool]
+        Selection state for each file.
+
+    Returns
+    -------
+    list[str]
+        Selected file paths.
+
+    Raises
+    ------
+    ValueError
+        If no files are selected.
+    """
+    selected = [f for f, c in zip(files, checked) if c]
+    if not selected:
+        raise ValueError("no files selected")
+    return selected
+
+
+def _build_backup_items(
+    file_groups: list[tuple[str, list[str]]],
+    active_family: str,
+) -> tuple[list[str], list[bool], list[int]]:
+    """Build a flat item list from grouped files, active family first.
+
+    Parameters
+    ----------
+    file_groups : list[tuple[str, list[str]]]
+        Each entry is ``(family, [absolute_paths])``.  Order within each
+        group is preserved.
+    active_family : str
+        The detected/active shell family.  Its files appear first and are
+        pre-checked; other families' files start unchecked.
+
+    Returns
+    -------
+    tuple[list[str], list[bool], list[int]]
+        ``(display_labels, default_checked, group_start_indices)``
+
+        *display_labels*
+            Labels shown in the checklist.  Group headers are encoded as
+            separator strings (e.g. ``"── bash (active) ──"``).
+        *default_checked*
+            Initial checked state — ``True`` for active family files,
+            ``False`` for others.
+        *group_start_indices*
+            Indices into *display_labels* that are group-header separators
+            (non-selectable).
+    """
+    labels: list[str] = []
+    checked: list[bool] = []
+    separators: list[int] = []
+
+    # Active family first
+    active_files: list[str] = []
+    other_groups: list[tuple[str, list[str]]] = []
+    for fam, flist in file_groups:
+        if fam == active_family:
+            active_files = flist
+        else:
+            other_groups.append((fam, flist))
+
+    if active_files:
+        separators.append(len(labels))
+        labels.append(f"── {active_family} (active) ──")
+        checked.append(False)  # separator not selectable
+        for f in active_files:
+            labels.append(f)
+            checked.append(True)
+
+    for fam, flist in other_groups:
+        if not flist:
+            continue
+        separators.append(len(labels))
+        labels.append(f"── {fam} ──")
+        checked.append(False)
+        for f in flist:
+            labels.append(f)
+            checked.append(False)
+
+    return labels, checked, separators
+
+
+def _draw_backup_checklist(
+    stdscr,
+    state: ChecklistState,
+    separators: list[int],
+    title: str,
+    subtitle: str,
+    footer: str,
+    extra_lines: list[str] | None = None,
+) -> None:
+    """Render a grouped checkbox list with family-header separators.
+
+    Separator rows are rendered bold without a checkbox.  File rows use
+    the standard ``[x]``/``[ ]`` markers.
+
+    Parameters
+    ----------
+    stdscr
+        Curses window.
+    state : ChecklistState
+        Current checklist state.
+    separators : list[int]
+        Indices in ``state.items`` that are group-header separators.
+    title : str
+        First header line.
+    subtitle : str
+        Second header line (controls hint).
+    footer : str
+        Bottom status bar text.
+    extra_lines : list[str] or None
+        Additional info lines shown between subtitle and the list.
+    """
+    sep_set = set(separators)
+    stdscr.clear()
+    stdscr.border()
+    h, w = stdscr.getmaxyx()
+    try:
+        stdscr.addstr(1, 2, title[: w - 4])
+        stdscr.addstr(2, 2, subtitle[: w - 4])
+    except curses.error:
+        pass
+
+    info_y = 4
+    if extra_lines:
+        for i, line in enumerate(extra_lines):
+            try:
+                stdscr.addstr(info_y + i, 2, line[: w - 4])
+            except curses.error:
+                pass
+        info_y += len(extra_lines) + 1
+
+    header_y = info_y
+    display_lines = h - (header_y + 3)
+    for i in range(max(0, display_lines)):
+        idx = state.top + i
+        y = header_y + i
+        if idx >= len(state.items):
+            break
+        if idx in sep_set:
+            # Group header — bold, no checkbox
+            line = state.items[idx][: w - 4]
+            try:
+                attr = curses.A_BOLD
+                if idx == state.selected:
+                    attr |= curses.A_REVERSE
+                stdscr.addstr(y, 2, line, attr)
+            except curses.error:
+                pass
+        else:
+            mark = "[x]" if state.checked[idx] else "[ ]"
+            line = f"{mark} {state.items[idx]}"
+            line = line[: w - 4]
+            try:
+                attr = curses.A_REVERSE if idx == state.selected else 0
+                stdscr.addstr(y, 2, line, attr)
+            except curses.error:
+                pass
+
+    try:
+        stdscr.addstr(h - 2, 2, footer[: w - 4])
+    except curses.error:
+        pass
+    stdscr.refresh()
+
+
+def display_backup_tui(
+    file_groups: list[tuple[str, list[str]]],
+    active_family: str,
+    archive_mode: bool = False,
+) -> Path | None:
+    """Interactive TUI for selecting files to back up.
+
+    Shows files from all shell families, grouped with headers.  The active
+    family's files appear first and are pre-checked; other families start
+    unchecked.
+
+    Parameters
+    ----------
+    file_groups : list[tuple[str, list[str]]]
+        Each entry is ``(family, [absolute_paths])``.
+    active_family : str
+        The detected/active shell family (shown first, pre-checked).
+    archive_mode : bool
+        If True, originals are deleted after backup (archive behavior).
+
+    Returns
+    -------
+    Path or None
+        Path to created archive, or ``None`` if the user cancelled.
+    """
+    from .backup import create_archive, create_backup
+
+    labels, default_checked, separators = _build_backup_items(file_groups, active_family)
+    sep_set = set(separators)
+
+    # Build flat list of actual file paths (excluding separators)
+    all_files: list[str] = [labels[i] for i in range(len(labels)) if i not in sep_set]
+
+    result: list[Path | None] = [None]
+
+    def _wrapper(stdscr):
+        curses.curs_set(0)
+        state = ChecklistState(
+            items=list(labels),
+            checked=list(default_checked),
+        )
+        # Skip cursor past first separator if present
+        if separators and state.selected in sep_set:
+            state.selected = min(state.selected + 1, len(labels) - 1)
+        status = ""
+
+        def _draw():
+            n_sel = sum(c for i, c in enumerate(state.checked) if i not in sep_set)
+            n_total = len(all_files)
+            mode_label = "archive (backup + delete)" if archive_mode else "backup"
+            extra = [
+                f"Active family: {active_family}    Mode: {mode_label}",
+                f"Files: {n_sel} selected / {n_total} total",
+            ]
+            if status:
+                extra.append(status)
+            _draw_backup_checklist(
+                stdscr,
+                state,
+                separators,
+                title="env-config: select files to back up",
+                subtitle="Space: toggle  a: all  n: none  Enter: create  q: quit",
+                footer="q=quit  Space=toggle  a=all  n=none  Enter=create backup",
+                extra_lines=extra,
+            )
+
+        def _confirm(prompt: str) -> bool:
+            stdscr.clear()
+            stdscr.border()
+            try:
+                stdscr.addstr(2, 2, prompt)
+                stdscr.addstr(4, 2, "y=yes  n=no")
+            except curses.error:
+                pass
+            stdscr.refresh()
+            while True:
+                ch = stdscr.getch()
+                if ch in (ord("y"), ord("Y")):
+                    return True
+                if ch in (ord("n"), ord("N")):
+                    return False
+
+        _draw()
+        while True:
+            ch = stdscr.getch()
+            h, _ = stdscr.getmaxyx()
+            display_lines = h - 11
+
+            if ch in (ord("q"), ord("Q")):
+                break
+
+            # Navigation — skip separators
+            old_sel = state.selected
+            _checklist_nav(ch, state, display_lines)
+            # If we landed on a separator, skip past it in the direction of travel
+            if state.selected in sep_set:
+                direction = 1 if state.selected > old_sel else -1
+                state.selected += direction
+                state.selected = max(0, min(state.selected, len(labels) - 1))
+                # If still on a separator (edge case), find next non-sep
+                while state.selected in sep_set and 0 < state.selected < len(labels) - 1:
+                    state.selected += direction
+
+            if ch in (curses.KEY_ENTER, 10, 13):
+                # Gather checked files (excluding separators)
+                selected_files = [
+                    labels[i] for i in range(len(labels)) if i not in sep_set and state.checked[i]
+                ]
+                if not selected_files:
+                    status = "No files selected"
+                    _draw()
+                    continue
+
+                if archive_mode:
+                    msg = f"Back up and DELETE {len(selected_files)} file(s)?"
+                else:
+                    msg = f"Back up {len(selected_files)} file(s)?"
+
+                if _confirm(msg):
+                    try:
+                        if archive_mode:
+                            result[0] = create_archive(selected_files, active_family)
+                        else:
+                            result[0] = create_backup(selected_files, active_family)
+                        status = f"Created: {result[0]}"
+                    except Exception as exc:
+                        status = f"Error: {exc}"
+                    _draw()
+                    stdscr.getch()
+                    break
+
+            _draw()
+
+    curses.wrapper(_wrapper)
+    return result[0]
+
+
+# ---------------------------------------------------------------------------
+# Restore TUI
+# ---------------------------------------------------------------------------
+
+
+def _archive_list_for_display(
+    archives: list[tuple[str, Path]],
+) -> list[dict[str, str]]:
+    """Build display data for archive selection.
+
+    Reads manifests and returns dicts with metadata for each archive.
+    Handles unreadable manifests gracefully.
+
+    Parameters
+    ----------
+    archives : list[tuple[str, Path]]
+        Output from :func:`backup.list_archives`.
+
+    Returns
+    -------
+    list[dict[str, str]]
+        Each dict has keys: ``timestamp``, ``family``, ``hostname``,
+        ``file_count``, ``path``.
+    """
+    from .backup import read_manifest
+
+    result = []
+    for timestamp, path in archives:
+        try:
+            manifest = read_manifest(path)
+            result.append(
+                {
+                    "timestamp": timestamp,
+                    "family": manifest.family,
+                    "hostname": manifest.hostname,
+                    "file_count": str(len(manifest.files)),
+                    "path": str(path),
+                }
+            )
+        except Exception:
+            result.append(
+                {
+                    "timestamp": timestamp,
+                    "family": "?",
+                    "hostname": "?",
+                    "file_count": "?",
+                    "path": str(path),
+                }
+            )
+    return result
+
+
+def _restore_file_status(
+    manifest_files: list[str],
+    target_dir: Path,
+) -> list[tuple[str, bool]]:
+    """Check which manifest files already exist on disk.
+
+    Parameters
+    ----------
+    manifest_files : list[str]
+        Relative file paths from the archive manifest.
+    target_dir : Path
+        Target directory (usually ``Path.home()``).
+
+    Returns
+    -------
+    list[tuple[str, bool]]
+        Each entry is ``(relative_path, already_exists)``.
+    """
+    return [(f, (target_dir / f).exists()) for f in manifest_files]
+
+
+def display_restore_tui(backup_dir: Path | None = None) -> list[str]:
+    """Interactive TUI for browsing archives and restoring files.
+
+    Two-phase workflow: first select an archive, then select files to
+    restore from that archive.
+
+    Parameters
+    ----------
+    backup_dir : Path or None
+        Override backup directory.  Defaults to :func:`backup.get_backup_dir`.
+
+    Returns
+    -------
+    list[str]
+        Absolute paths of restored files (empty if cancelled).
+    """
+    from .backup import list_archives, read_manifest, restore_from_archive
+
+    restored_files: list[str] = []
+
+    def _wrapper(stdscr):
+        curses.curs_set(0)
+        archives = list_archives(backup_dir)
+        if not archives:
+            stdscr.clear()
+            stdscr.border()
+            try:
+                stdscr.addstr(2, 2, "No backup archives found.")
+                stdscr.addstr(4, 2, "Press any key to exit.")
+            except curses.error:
+                pass
+            stdscr.refresh()
+            stdscr.getch()
+            return
+
+        display_data = _archive_list_for_display(archives)
+
+        # --- Phase 1: archive selection ---
+        selected = 0
+        top = 0
+
+        def _draw_archive_list():
+            stdscr.clear()
+            stdscr.border()
+            h, w = stdscr.getmaxyx()
+            try:
+                stdscr.addstr(1, 2, "env-config: restore from backup")
+                stdscr.addstr(2, 2, "Up/Down: navigate  Enter: select archive  q: quit")
+                stdscr.addstr(4, 2, "Available archives:")
+            except curses.error:
+                pass
+            header_y = 6
+            display_lines = h - (header_y + 3)
+            for i in range(max(0, display_lines)):
+                idx = top + i
+                y = header_y + i
+                if idx >= len(display_data):
+                    break
+                d = display_data[idx]
+                line = (
+                    f"{d['timestamp']}  ({d['file_count']} files)"
+                    f"  {d['family']}  {d['hostname']}"
+                )
+                line = line[: w - 4]
+                try:
+                    attr = curses.A_REVERSE if idx == selected else 0
+                    stdscr.addstr(y, 2, line, attr)
+                except curses.error:
+                    pass
+            try:
+                stdscr.addstr(h - 2, 2, "q=quit  Enter=select")
+            except curses.error:
+                pass
+            stdscr.refresh()
+
+        def _confirm(prompt: str) -> bool:
+            stdscr.clear()
+            stdscr.border()
+            try:
+                stdscr.addstr(2, 2, prompt)
+                stdscr.addstr(4, 2, "y=yes  n=no")
+            except curses.error:
+                pass
+            stdscr.refresh()
+            while True:
+                ch = stdscr.getch()
+                if ch in (ord("y"), ord("Y")):
+                    return True
+                if ch in (ord("n"), ord("N")):
+                    return False
+
+        _draw_archive_list()
+        chosen_archive = None
+        while True:
+            ch = stdscr.getch()
+            if ch in (ord("q"), ord("Q")):
+                return
+
+            h, _ = stdscr.getmaxyx()
+            display_lines = h - 9
+            selected, top = _config_nav(ch, selected, top, len(archives), display_lines)
+
+            if ch in (curses.KEY_ENTER, 10, 13):
+                chosen_archive = archives[selected][1]
+                break
+
+            _draw_archive_list()
+
+        # --- Phase 2: file selection from chosen archive ---
+        manifest = read_manifest(chosen_archive)
+        target_dir = Path.home()
+        file_status = _restore_file_status(manifest.files, target_dir)
+        labels = [f"{name}  (exists)" if exists else name for name, exists in file_status]
+        state = ChecklistState(
+            items=labels,
+            checked=[True] * len(labels),
+        )
+        force = False
+        status = ""
+
+        def _draw_restore():
+            n_sel = sum(state.checked)
+            force_label = "YES" if force else "NO"
+            extra = [
+                f"Archive: {chosen_archive.name}  ({manifest.timestamp})",
+                f"Force overwrite: {force_label}    Files: {n_sel} selected / {len(labels)} total",
+            ]
+            if status:
+                extra.append(status)
+            _draw_checklist(
+                stdscr,
+                state,
+                title="env-config: select files to restore",
+                subtitle="Space: toggle  a: all  n: none  f: force  Enter: restore  q: back",
+                footer="q=back  Space=toggle  f=force  Enter=restore",
+                extra_lines=extra,
+            )
+
+        _draw_restore()
+        while True:
+            ch = stdscr.getch()
+            if ch in (ord("q"), ord("Q")):
+                # go back to archive list — for simplicity, just exit
+                break
+
+            h, _ = stdscr.getmaxyx()
+            display_lines = h - 12
+
+            _checklist_nav(ch, state, display_lines)
+
+            if ch in (ord("f"), ord("F")):
+                force = not force
+
+            if ch in (curses.KEY_ENTER, 10, 13):
+                selected_files = [manifest.files[i] for i, c in enumerate(state.checked) if c]
+                if not selected_files:
+                    status = "No files selected"
+                    _draw_restore()
+                    continue
+
+                action = "restore (overwrite)" if force else "restore (skip existing)"
+                if _confirm(f"{action} {len(selected_files)} file(s)?"):
+                    try:
+                        result = restore_from_archive(
+                            chosen_archive,
+                            target_dir=target_dir,
+                            include=[os.path.basename(f) for f in selected_files],
+                            force=force,
+                        )
+                        restored_files.extend(result)
+                        status = f"Restored {len(result)} file(s)"
+                    except Exception as exc:
+                        status = f"Error: {exc}"
+                    _draw_restore()
+                    stdscr.getch()
+                    break
+
+            _draw_restore()
+
+    curses.wrapper(_wrapper)
+    return restored_files
+
+
+# ---------------------------------------------------------------------------
+# Config editor helpers (testable without curses)
+# ---------------------------------------------------------------------------
+
+
+def validate_editor_config(path: str | Path) -> list[str]:
+    """Validate a TOML config file against the schema.
+
+    Parameters
+    ----------
+    path : str or Path
+        Path to a TOML config file (e.g. the user config after editing).
+
+    Returns
+    -------
+    list[str]
+        Error messages.  Empty means the file is valid.  Includes TOML
+        parse errors as well as schema violations.
+    """
+    import tomllib
+
+    from .config import validate_config
+
+    p = Path(path)
+    if not p.exists():
+        return ["file does not exist"]
+    try:
+        with open(p, "rb") as f:
+            data = tomllib.load(f)
+    except tomllib.TOMLDecodeError as exc:
+        return [f"invalid TOML: {exc}"]
+    if not isinstance(data, dict):
+        return ["config must be a TOML table"]
+    return validate_config(data)
+
+
+# ---------------------------------------------------------------------------
+# Config TUI
+# ---------------------------------------------------------------------------
+
+
+def _draw_config_screen(
+    stdscr, keys: list[str], values: dict[str, Any], selected: int, top: int, status: str
+) -> None:
+    """Draw the config editor main screen."""
+    from .config import CONFIG_SCHEMA
+
+    stdscr.clear()
+    stdscr.border()
+    h, w = stdscr.getmaxyx()
+    stdscr.addstr(1, 2, "env-config: configuration editor")
+    stdscr.addstr(2, 2, "Up/Down: navigate  Enter: edit  e: $EDITOR  r: reset  q: quit")
+    header_y = 4
+    col_val = min(32, w // 2)
+    stdscr.addstr(header_y, 2, f"{'Key':<{col_val}} Value")
+    display_lines = h - (header_y + 4)
+
+    for i in range(display_lines):
+        idx = top + i
+        y = header_y + 1 + i
+        if idx >= len(keys):
+            break
+        key = keys[idx]
+        meta = CONFIG_SCHEMA[key]
+        val_repr = repr(values.get(key, meta.default))
+        line = f"{key:<{col_val}} {val_repr}"
+        line = line[: w - 4]
+        try:
+            attr = curses.A_REVERSE if idx == selected else 0
+            stdscr.addstr(y, 2, line, attr)
+        except curses.error:
+            pass
+
+    if status:
+        try:
+            stdscr.addstr(h - 3, 2, status[: w - 4])
+        except curses.error:
+            pass
+    stdscr.addstr(h - 2, 2, "q=quit  Enter=edit  e=$EDITOR  r=reset")
+    stdscr.refresh()
+
+
+def _prompt_value(stdscr, key: str, current: Any) -> str | None:
+    """Show a one-line prompt for a new value; return the string or None on escape."""
+    h, w = stdscr.getmaxyx()
+    prompt = f"New value for {key} (current: {current!r}): "
+    try:
+        stdscr.addstr(h - 3, 2, " " * (w - 4))
+        stdscr.addstr(h - 3, 2, prompt[: w - 4])
+        stdscr.refresh()
+    except curses.error:
+        pass
+    curses.echo()
+    curses.curs_set(1)
+    try:
+        raw = stdscr.getstr(h - 3, 2 + len(prompt), w - 4 - len(prompt))
+    except curses.error:
+        raw = None
+    curses.noecho()
+    curses.curs_set(0)
+    if raw is None:
+        return None
+    return raw.decode("utf-8", errors="replace").strip()
+
+
+def _editor_flow(stdscr) -> str:
+    """Open user config in $EDITOR, validate on return.
+
+    Returns a status message describing the outcome.
+    """
+    from .config import save_config, user_config_path
+
+    path = user_config_path()
+    # ensure file exists so editor has something to open
+    if not path.exists():
+        save_config(path, {})
+
+    backup = path.read_text(encoding="utf8")
+
+    editor = os.environ.get("EDITOR") or os.environ.get("VISUAL") or "vi"
+    curses.endwin()
+    subprocess.run([editor, str(path)])
+
+    errors = validate_editor_config(path)
+    if errors:
+        # restore backup
+        path.write_text(backup, encoding="utf8")
+        return f"Reverted: {errors[0]}"
+
+    return "Config saved"
+
+
+def _handle_config_edit(stdscr, key: str, values: dict[str, Any]) -> str:
+    """Prompt for a new value and apply it.
+
+    Returns
+    -------
+    str
+        Status message for the user.
+    """
+    from .config import CONFIG_SCHEMA, coerce_value, config_set
+
+    meta = CONFIG_SCHEMA[key]
+    current = values.get(key, meta.default)
+    raw = _prompt_value(stdscr, key, current)
+    if raw is None or raw == "":
+        return "Edit cancelled"
+    try:
+        if meta.value_type == "list_of_strings":
+            val = [s.strip() for s in raw.split(",") if s.strip()]
+        else:
+            val = coerce_value(raw, meta.value_type)
+        config_set(key, val)
+        return f"Set {key}"
+    except (ValueError, KeyError) as exc:
+        return f"Error: {exc}"
+
+
+def _handle_config_reset(key: str) -> str:
+    """Reset a key and return a status string."""
+    from .config import config_reset
+
+    try:
+        config_reset(key)
+        return f"Reset {key}"
+    except KeyError as exc:
+        return f"Error: {exc}"
+
+
+def _config_nav(ch: int, selected: int, top: int, n_keys: int, display_lines: int):
+    """Process navigation keys, returning updated (selected, top)."""
+    if ch in (curses.KEY_DOWN, ord("j")) and selected < n_keys - 1:
+        selected += 1
+        if selected >= top + display_lines:
+            top += 1
+    elif ch in (curses.KEY_UP, ord("k")) and selected > 0:
+        selected -= 1
+        if selected < top:
+            top = max(0, top - 1)
+    return selected, top
+
+
+def display_config_tui() -> None:
+    """Interactive TUI for viewing and editing config key/value pairs.
+
+    Controls
+    --------
+    - Up/Down (j/k) : navigate keys
+    - Enter : edit the selected key inline
+    - e : open user config in ``$EDITOR`` (validated on save)
+    - r : reset selected key to default
+    - q : quit
+    """
+    from .config import CONFIG_SCHEMA, config_show
+
+    keys = sorted(CONFIG_SCHEMA)
+
+    def _wrapper(stdscr):
+        curses.curs_set(0)
+        selected = 0
+        top = 0
+        status = ""
+        values = config_show()
+        _draw_config_screen(stdscr, keys, values, selected, top, status)
+
+        while True:
+            ch = stdscr.getch()
+            h, _ = stdscr.getmaxyx()
+            display_lines = h - 8
+
+            if ch in (ord("q"), ord("Q")):
+                break
+
+            selected, top = _config_nav(ch, selected, top, len(keys), display_lines)
+
+            if ch in (curses.KEY_ENTER, 10, 13):
+                status = _handle_config_edit(stdscr, keys[selected], values)
+                values = config_show()
+            elif ch in (ord("e"), ord("E")):
+                status = _editor_flow(stdscr)
+                values = config_show()
+            elif ch in (ord("r"), ord("R")):
+                status = _handle_config_reset(keys[selected])
+                values = config_show()
+
+            _draw_config_screen(stdscr, keys, values, selected, top, status)
 
     curses.wrapper(_wrapper)

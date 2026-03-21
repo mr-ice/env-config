@@ -94,7 +94,7 @@ class TestCreateBackup:
 
         assert archive_path.exists()
         assert archive_path.suffix == ".gz"
-        assert "env-config-backup-" in archive_path.name
+        assert "shellctl-backup-" in archive_path.name
 
     def test_stores_relative_paths(self, tmp_path, monkeypatch):
         home = _make_home(tmp_path, monkeypatch)
@@ -234,9 +234,9 @@ class TestFindArchive:
 
         archives = list_archives(backup_dir=backup_dir)
         if len(archives) >= 2:
-            # "env-config-backup" matches all archives
+            # "shellctl-backup" matches all archives
             with pytest.raises(ValueError, match="ambiguous"):
-                find_archive("env-config-backup", backup_dir=backup_dir)
+                find_archive("shellctl-backup", backup_dir=backup_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -392,7 +392,7 @@ def _cli_env(tmp_path, monkeypatch):
     """Set up isolated environment for CLI backup tests."""
     home = _make_home(tmp_path, monkeypatch)
     backup_dir = tmp_path / "backups"
-    monkeypatch.setenv("ENVCONFIG_BACKUP_DIR", str(backup_dir))
+    monkeypatch.setenv("SHELLCTL_BACKUP_DIR", str(backup_dir))
     # Patch discover to return our fake files
     files = _create_startup_files(home, [".bashrc", ".bash_profile", ".profile"])
     monkeypatch.setattr(
@@ -414,7 +414,7 @@ class TestCLIBackup:
 
         rc = main(["backup", "--family", "bash"])
         assert rc == 0
-        archives = list(backup_dir.glob("env-config-backup-*.tar.gz"))
+        archives = list(backup_dir.glob("shellctl-backup-*.tar.gz"))
         assert len(archives) == 1
 
     def test_backup_with_include(self, _cli_env, monkeypatch):
@@ -425,7 +425,7 @@ class TestCLIBackup:
 
         rc = main(["backup", "--family", "bash", "--include", ".*bashrc*"])
         assert rc == 0
-        archives = list(backup_dir.glob("env-config-backup-*.tar.gz"))
+        archives = list(backup_dir.glob("shellctl-backup-*.tar.gz"))
         assert len(archives) == 1
         manifest = read_manifest(archives[0])
         assert manifest.files == [".bashrc"]
@@ -444,7 +444,7 @@ class TestCLIArchive:
         assert rc == 0
         for f in files:
             assert not os.path.exists(f)
-        archives = list(backup_dir.glob("env-config-backup-*.tar.gz"))
+        archives = list(backup_dir.glob("shellctl-backup-*.tar.gz"))
         assert len(archives) == 1
 
 
@@ -484,9 +484,9 @@ class TestCLIRestore:
         )
         main(["backup", "--family", "bash"])
 
-        archives = list(backup_dir.glob("env-config-backup-*.tar.gz"))
+        archives = list(backup_dir.glob("shellctl-backup-*.tar.gz"))
         if len(archives) >= 2:
-            rc = main(["restore", "--archive", "env-config-backup"])
+            rc = main(["restore", "--archive", "shellctl-backup"])
             assert rc == 1
             assert "ambiguous" in capsys.readouterr().err.lower()
 
@@ -510,7 +510,7 @@ class TestCLIListBackups:
     def test_list_backups_empty(self, tmp_path, monkeypatch, capsys):
         from env_config.cli import main
 
-        monkeypatch.setenv("ENVCONFIG_BACKUP_DIR", str(tmp_path / "empty"))
+        monkeypatch.setenv("SHELLCTL_BACKUP_DIR", str(tmp_path / "empty"))
         rc = main(["list-backups"])
         assert rc == 0
         assert "no backup archives" in capsys.readouterr().out.lower()

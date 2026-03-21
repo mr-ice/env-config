@@ -157,7 +157,7 @@ class TestInstallComposeFiles:
         assert str(dest) in installed
 
     def test_updates_registry(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("ENVCONFIG_CACHE_DIR", str(tmp_path / "cache"))
+        monkeypatch.setenv("SHELLCTL_CACHE_DIR", str(tmp_path / "cache"))
         src = tmp_path / "compose"
         src.mkdir()
         (src / "zshrc-fzf").write_text("# FZF")
@@ -183,11 +183,11 @@ class TestRegistry:
     """Tests for the compose registry."""
 
     def test_empty_registry(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("ENVCONFIG_CACHE_DIR", str(tmp_path))
+        monkeypatch.setenv("SHELLCTL_CACHE_DIR", str(tmp_path))
         assert get_registry() == []
 
     def test_registry_path_respects_env(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("ENVCONFIG_CACHE_DIR", str(tmp_path))
+        monkeypatch.setenv("SHELLCTL_CACHE_DIR", str(tmp_path))
         p = _registry_path()
         assert str(tmp_path) in str(p)
         assert p.name == "compose_registry.json"

@@ -1,4 +1,4 @@
-"""Configuration helpers for env-config (global and user).
+"""Configuration helpers for shellctl (global and user).
 
 This module provides loading and saving of a global config (system-wide)
 and a per-user config file, a declarative schema of all known config keys,
@@ -32,7 +32,7 @@ from typing import Any
 
 import tomli_w
 
-GLOBAL_CONFIG_PATH = Path("/etc/env-config.toml")
+GLOBAL_CONFIG_PATH = Path("/etc/shellctl.toml")
 
 _MISSING = object()
 
@@ -357,16 +357,23 @@ def validate_config(data: dict[str, Any]) -> list[str]:
 
 def user_config_path() -> Path:
     """Return the path to the user config file."""
-    return Path.home() / ".env-config.toml"
+    return Path.home() / ".shellctl.toml"
 
 
 def global_config_path() -> Path:
     """Return the global/site config path.
 
     Environment override:
-    - ``ENVCONFIG_GLOBAL_CONFIG_PATH`` to point at a non-/etc location.
+    - ``SHELLCTL_GLOBAL_CONFIG_PATH`` to point at a non-/etc location.
+    - ``ENVCONFIG_GLOBAL_CONFIG_PATH`` is accepted for backward compatibility.
     """
-    return Path(str(os.environ.get("ENVCONFIG_GLOBAL_CONFIG_PATH") or GLOBAL_CONFIG_PATH))
+    return Path(
+        str(
+            os.environ.get("SHELLCTL_GLOBAL_CONFIG_PATH")
+            or os.environ.get("ENVCONFIG_GLOBAL_CONFIG_PATH")
+            or GLOBAL_CONFIG_PATH
+        )
+    )
 
 
 def _strip_none(data: dict) -> dict:
@@ -505,8 +512,8 @@ def render_default_config_template() -> str:
         sections.setdefault(section, []).append((key, meta))
 
     lines: list[str] = [
-        "# env-config global defaults template",
-        "# Copy to /etc/env-config.toml (or ENVCONFIG_GLOBAL_CONFIG_PATH) and edit.",
+        "# shellctl global defaults template",
+        "# Copy to /etc/shellctl.toml (or SHELLCTL_GLOBAL_CONFIG_PATH) and edit.",
         "",
     ]
     for section in sorted(sections):

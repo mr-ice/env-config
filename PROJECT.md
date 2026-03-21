@@ -1,5 +1,5 @@
-# env-config
-env-config is to be a tool to allow the operator to control their shell environment startup files
+# shellctl
+shellctl is to be a tool to allow the operator to control their shell environment startup files
 
 ## Features
 
@@ -16,7 +16,7 @@ env-config is to be a tool to allow the operator to control their shell environm
    4. keep instructions and urls to rebuild the patched shells so that we can deploy them with this tool.
    5. When generating the list, be able to show which are sourced in which modes.
 
-3. Establish a global and user-level configuration file for configuration elements for this env-config tool.  Establish the elements that need to be there, and provide a command-line and TUI way to edit these elements storing operator specific ones in the operator's home directory.
+3. Establish a global and user-level configuration file for configuration elements for this shellctl tool.  Establish the elements that need to be there, and provide a command-line and TUI way to edit these elements storing operator specific ones in the operator's home directory.
 
 3. This script should work cleanly in three modes.
    1. Non-Interactive to complete a task without prompting from the operator.

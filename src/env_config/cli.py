@@ -1,4 +1,4 @@
-"""Command-line interface for env-config (scaffold)."""
+"""Command-line interface for shellctl (scaffold)."""
 from __future__ import annotations
 
 import argparse
@@ -15,7 +15,7 @@ LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 
 
 def _configure_logging(level: str) -> None:
-    """Configure logging for the env-config package."""
+    """Configure logging for the shellctl package."""
     numeric = getattr(logging, level.upper(), logging.WARNING)
     logging.basicConfig(
         level=numeric,
@@ -26,7 +26,7 @@ def _configure_logging(level: str) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     """Build the argument parser for the CLI."""
-    p = argparse.ArgumentParser(prog="env-config")
+    p = argparse.ArgumentParser(prog="shellctl")
     p.add_argument(
         "--log-level",
         choices=LOG_LEVELS,
@@ -51,7 +51,7 @@ def build_parser() -> argparse.ArgumentParser:
     disc.add_argument(
         "--use-shell-trace",
         action="store_true",
-        help="Force shell-level tracing (honors ENVCONFIG_MOCK_TRACE_DIR)",
+        help="Force shell-level tracing (honors SHELLCTL_MOCK_TRACE_DIR)",
     )
     disc.add_argument(
         "--refresh-cache",
@@ -156,16 +156,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--force",
         action="store_true",
         help="Overwrite existing file",
-    )
-
-    settings_p = sub.add_parser(
-        "settings",
-        help="Quick config edits: `env-config settings key = value`",
-    )
-    settings_p.add_argument(
-        "tokens",
-        nargs="*",
-        help="Examples: `show`, `get trace.threshold_secs`, `trace.threshold_secs = 0.05`",
     )
 
     # --- backup / archive / restore / list-backups ---
@@ -362,44 +352,8 @@ def _handle_config(args: argparse.Namespace) -> int:
         print(f"wrote global config template: {target}")
         return 0
 
-    print("usage: env-config config {show,get,set,reset,init-global} ...", file=sys.stderr)
+    print("usage: shellctl config {show,get,set,reset,init-global} ...", file=sys.stderr)
     return 1
-
-
-def _handle_settings(tokens: list[str]) -> int:
-    """Handle quick settings UX (assignment-style syntax)."""
-    if not tokens or tokens[0] in ("show", "list"):
-        return _handle_config_show()
-
-    head = tokens[0].lower()
-    if head in ("get", "show") and len(tokens) >= 2:
-        return _handle_config_get(tokens[1])
-    if head in ("reset", "unset") and len(tokens) >= 2:
-        return _handle_config_reset(tokens[1])
-    if head == "set" and len(tokens) >= 3:
-        return _handle_config_set(tokens[1], tokens[2:], append=False)
-
-    key: str
-    values: list[str]
-    if "=" in tokens[0]:
-        key, first_val = tokens[0].split("=", 1)
-        values = ([first_val] if first_val else []) + tokens[1:]
-    elif len(tokens) >= 3 and tokens[1] == "=":
-        key = tokens[0]
-        values = tokens[2:]
-    elif len(tokens) >= 2:
-        key = tokens[0]
-        values = tokens[1:]
-    else:
-        print("usage: env-config settings <key> = <value>", file=sys.stderr)
-        return 1
-
-    key = key.strip()
-    values = [v for v in values if v != ""]
-    if not key or not values:
-        print("usage: env-config settings <key> = <value>", file=sys.stderr)
-        return 1
-    return _handle_config_set(key, values, append=False)
 
 
 def _resolve_family(args: argparse.Namespace) -> str:
@@ -601,7 +555,7 @@ def _handle_compose(args: argparse.Namespace) -> int:
     if compose_cmd == "pick":
         return _handle_compose_pick(args, family)
 
-    print("usage: env-config compose {list,pick} ...", file=sys.stderr)
+    print("usage: shellctl compose {list,pick} ...", file=sys.stderr)
     return 1
 
 
@@ -688,7 +642,7 @@ def _handle_list_backups() -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Command-Line processor for env-config."""
+    """Command-line processor for shellctl."""
     if argv is None:
         argv = sys.argv[1:]
     parser = build_parser()
@@ -718,7 +672,7 @@ def main(argv: list[str] | None = None) -> int:
             shell_path = info.get("intended_shell")
         # honor CLI flag to force shell-level tracer
         if getattr(args, "use_shell_trace", False):
-            os.environ["ENVCONFIG_USE_SHELL_TRACE"] = "1"
+            os.environ["SHELLCTL_USE_SHELL_TRACE"] = "1"
         refresh_cache = getattr(args, "refresh_cache", False)
         # normalize family
         if isinstance(family, str):
@@ -881,8 +835,6 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "config":
         return _handle_config(args)
-    if args.cmd == "settings":
-        return _handle_settings(getattr(args, "tokens", []))
 
     if args.cmd == "backup":
         return _handle_backup(args)

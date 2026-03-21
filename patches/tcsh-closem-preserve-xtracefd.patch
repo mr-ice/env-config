@@ -1,4 +1,4 @@
-From: Env-Config Project <env-config@local>
+From: Shellctl Project <shellctl@local>
 Subject: [PATCH] closem: do not close TCSH_XTRACEFD
 
 tcsh's closem() closes every fd except SHIN/SHOUT/SHDIAG/OLDSTD/FSHTTY.

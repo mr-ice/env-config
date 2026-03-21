@@ -1,4 +1,4 @@
-From: Env-Config Project <env-config@local>
+From: Shellctl Project <shellctl@local>
 Date: Mon, 24 Feb 2025 00:00:00 +0000
 Subject: [PATCH] Add TCSH_XTRACEFD support for tracing to a file descriptor
 

@@ -77,7 +77,7 @@ class TestDeleteNested:
 @pytest.fixture()
 def _isolate_config(tmp_path, monkeypatch):
     """Point config paths to tmp_path so tests don't touch real files."""
-    user_cfg = tmp_path / ".env-config.toml"
+    user_cfg = tmp_path / ".shellctl.toml"
     global_cfg = tmp_path / "global.toml"
     monkeypatch.setattr("env_config.config.user_config_path", lambda: user_cfg)
     monkeypatch.setattr("env_config.config.GLOBAL_CONFIG_PATH", global_cfg)
@@ -206,11 +206,11 @@ class TestGlobalTemplate:
         assert "[compose]" in text
 
     def test_write_template_file(self, _isolate_config, tmp_path):
-        p = tmp_path / "env-config.toml"
+        p = tmp_path / "shellctl.toml"
         write_default_config_template(p)
         assert p.exists()
 
     def test_global_path_env_override(self, _isolate_config, monkeypatch, tmp_path):
         p = tmp_path / "site.toml"
-        monkeypatch.setenv("ENVCONFIG_GLOBAL_CONFIG_PATH", str(p))
+        monkeypatch.setenv("SHELLCTL_GLOBAL_CONFIG_PATH", str(p))
         assert global_config_path() == p

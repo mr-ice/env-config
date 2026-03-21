@@ -39,7 +39,11 @@ DEFAULT_SHELL_RC_FILES: dict[str, list[str]] = {
 
 def _registry_path() -> Path:
     """Return the path to the compose registry file."""
-    cache = Path(os.environ.get("ENVCONFIG_CACHE_DIR") or Path.home() / ".cache" / "env-config")
+    cache = Path(
+        os.environ.get("SHELLCTL_CACHE_DIR")
+        or os.environ.get("ENVCONFIG_CACHE_DIR")
+        or Path.home() / ".cache" / "shellctl"
+    )
     cache.mkdir(parents=True, exist_ok=True)
     return cache / "compose_registry.json"
 

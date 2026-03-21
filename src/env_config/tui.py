@@ -42,16 +42,17 @@ def resolve_path(name: str) -> str:
 def backup_file(path: str) -> bool:
     """Create a timestamped backup of `path` into the backup directory.
 
-    Backup directory is taken from `ENVCONFIG_BACKUP_DIR` or defaults to
-    `~/.cache/env-config/backups`.
+    Backup directory is taken from `SHELLCTL_BACKUP_DIR` (or legacy
+    `ENVCONFIG_BACKUP_DIR`) and defaults to `~/.cache/shellctl/backups`.
     """
     try:
         p = Path(path)
         if not p.exists():
             return False
         backup_dir = Path(
-            os.environ.get("ENVCONFIG_BACKUP_DIR")
-            or Path.home() / ".cache" / "env-config" / "backups"
+            os.environ.get("SHELLCTL_BACKUP_DIR")
+            or os.environ.get("ENVCONFIG_BACKUP_DIR")
+            or Path.home() / ".cache" / "shellctl" / "backups"
         )
         backup_dir.mkdir(parents=True, exist_ok=True)
         ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -81,7 +82,7 @@ def _draw_screen(stdscr, analysis: dict[str, Any], top: int, selected: int):
     """Draw the main screen with the list of files and their timings."""
     stdscr.clear()
     stdscr.border()
-    stdscr.addstr(1, 2, "env-config: startup trace analysis")
+    stdscr.addstr(1, 2, "shellctl: startup trace analysis")
     total = analysis.get("total", 0.0)
     stdscr.addstr(2, 2, f"Total: {total:.6f}s")
     stdscr.addstr(3, 2, "Flags: '!' = exceeded threshold; navigate with Up/Down; Enter for details")
@@ -275,7 +276,7 @@ def display_discovery_tui(
             stdscr.clear()
             stdscr.border()
             h, w = stdscr.getmaxyx()
-            stdscr.addstr(1, 2, "env-config: discovery (per-mode)")
+            stdscr.addstr(1, 2, "shellctl: discovery (per-mode)")
             stdscr.addstr(
                 2,
                 2,
@@ -878,7 +879,7 @@ def display_backup_tui(
                 stdscr,
                 state,
                 separators,
-                title="env-config: select files to back up",
+                title="shellctl: select files to back up",
                 subtitle="Space: toggle  a: all  n: none  Enter: create  q: quit",
                 footer="q=quit  Space=toggle  a=all  n=none  Enter=create backup",
                 extra_lines=extra,
@@ -1074,7 +1075,7 @@ def display_restore_tui(backup_dir: Path | None = None) -> list[str]:
             stdscr.border()
             h, w = stdscr.getmaxyx()
             try:
-                stdscr.addstr(1, 2, "env-config: restore from backup")
+                stdscr.addstr(1, 2, "shellctl: restore from backup")
                 stdscr.addstr(2, 2, "Up/Down: navigate  Enter: select archive  q: quit")
                 stdscr.addstr(4, 2, "Available archives:")
             except curses.error:
@@ -1160,7 +1161,7 @@ def display_restore_tui(backup_dir: Path | None = None) -> list[str]:
             _draw_checklist(
                 stdscr,
                 state,
-                title="env-config: select files to restore",
+                title="shellctl: select files to restore",
                 subtitle="Space: toggle  a: all  n: none  f: force  Enter: restore  q: back",
                 footer="q=back  Space=toggle  f=force  Enter=restore",
                 extra_lines=extra,
@@ -1259,7 +1260,7 @@ def display_compose_pick_tui(family: str) -> list[str]:
             _draw_checklist(
                 stdscr,
                 state,
-                title="env-config: select compose files to install",
+                title="shellctl: select compose files to install",
                 subtitle="Space: toggle  a: all  n: none  Enter: install  q: quit",
                 footer="q=quit  Space=toggle  a=all  n=none  Enter=install",
                 extra_lines=extra,
@@ -1365,7 +1366,7 @@ def _draw_config_screen(
     stdscr.clear()
     stdscr.border()
     h, w = stdscr.getmaxyx()
-    stdscr.addstr(1, 2, "env-config: configuration editor")
+    stdscr.addstr(1, 2, "shellctl: configuration editor")
     stdscr.addstr(2, 2, "Up/Down: navigate  Enter: edit  e: $EDITOR  r: reset  q: quit")
     header_y = 4
     col_val = min(32, w // 2)

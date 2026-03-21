@@ -225,7 +225,7 @@ def _cli_backup_env(tmp_path, monkeypatch):
     (home / ".bash_profile").write_text("# profile")
     (home / ".zshrc").write_text("# zshrc")
     monkeypatch.setattr("pathlib.Path.home", lambda: home)
-    monkeypatch.setenv("ENVCONFIG_BACKUP_DIR", str(tmp_path / "backups"))
+    monkeypatch.setenv("SHELLCTL_BACKUP_DIR", str(tmp_path / "backups"))
 
     bash_files = [str(home / ".bashrc"), str(home / ".bash_profile")]
     zsh_files = [str(home / ".zshrc")]

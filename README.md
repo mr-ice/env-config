@@ -1,6 +1,6 @@
-# env-config
+# shellctl
 
-env-config is a lightweight toolkit to discover, trace, and analyze shell
+shellctl is a lightweight toolkit to discover, trace, and analyze shell
 startup files (bash, zsh, tcsh) so you can find slow or surprising startup
 hooks. The project includes safe mock traces and a simple TUI for exploration.
 
@@ -15,22 +15,22 @@ python -m pip install -e .
 Run the CLI (example):
 
 ```bash
-env-config detect
-env-config discover --family bash --modes
-env-config trace --family bash --mode ln --dry-run
-env-config trace --family bash --mode login_noninteractive --tui
+shellctl detect
+shellctl discover --family bash --modes
+shellctl trace --family bash --mode ln --dry-run
+shellctl trace --family bash --mode login_noninteractive --tui
 ```
 
 Force the safer shell-level tracer (useful on macOS/CI):
 
 ```bash
-env-config discover --use-shell-trace --modes
+shellctl discover --use-shell-trace --modes
 ```
 
 Clear discovery cache:
 
 ```bash
-env-config discover --refresh-cache
+shellctl discover --refresh-cache
 ```
 
 ## Logging
@@ -38,21 +38,21 @@ env-config discover --refresh-cache
 Use `--log-level` to control verbosity (applies to all commands):
 
 ```bash
-env-config --log-level DEBUG compose list
+shellctl --log-level DEBUG compose list
 ```
 
 Levels: DEBUG, INFO, WARNING, ERROR, CRITICAL (default: WARNING).
 
 ## Environment variables
 
-- `ENVCONFIG_MOCK_TRACE_DIR`: directory of fixture traces used by tests and
+- `SHELLCTL_MOCK_TRACE_DIR`: directory of fixture traces used by tests and
   to run the shell-level tracer in mock mode. Point this to
   `tests/fixtures/traces` to reproduce CI/test behavior.
-- `ENVCONFIG_USE_SHELL_TRACE`: set to `1`, `true`, or `yes` to force the
+- `SHELLCTL_USE_SHELL_TRACE`: set to `1`, `true`, or `yes` to force the
   shell-level tracer instead of system tracers like `strace`.
-- `ENVCONFIG_CACHE_DIR`: overrides the cache directory used by discovery.
-- `ENVCONFIG_BACKUP_DIR`: overrides the backup archive directory
-  (default `~/.cache/env-config/backups`).
+- `SHELLCTL_CACHE_DIR`: overrides the cache directory used by discovery.
+- `SHELLCTL_BACKUP_DIR`: overrides the backup archive directory
+  (default `~/.cache/shellctl/backups`).
 
 ## CLI highlights
 
@@ -88,7 +88,7 @@ PYTHONPATH=src pytest -q
 ```
 
 The tests use mock trace fixtures under `tests/fixtures/traces`; to run the
-discovery/trace code paths using these fixtures set `ENVCONFIG_MOCK_TRACE_DIR`.
+discovery/trace code paths using these fixtures set `SHELLCTL_MOCK_TRACE_DIR`.
 
 ## Development notes
 
@@ -97,13 +97,13 @@ discovery/trace code paths using these fixtures set `ENVCONFIG_MOCK_TRACE_DIR`.
   there when adding new fixtures.
 - Discovery: `src/env_config/discover.py` prefers system tracers where
   available but falls back to the safer shell-level tracer which honors the
-  mock fixtures. The cache directory defaults to `~/.cache/env-config` but
-  can be overridden with `ENVCONFIG_CACHE_DIR`.
+  mock fixtures. The cache directory defaults to `~/.cache/shellctl` but
+  can be overridden with `SHELLCTL_CACHE_DIR`.
 - TUI: a simple curses UI lives in `src/env_config/tui.py`.
 
-# env-config
+# shellctl
 
-env-config is a tool to manage shell
+shellctl is a tool to manage shell
 startup files (login/profile/rc files), back them up, and include compose startup files from directories given in the config.
 
 Current implemented features (prototype)
@@ -116,7 +116,7 @@ Current implemented features (prototype)
 
 - `discover`: best-effort discovery of startup files used by shell
   families. Defaults to shell-level tracing (portable). Optional
-  `ENVCONFIG_USE_SYSTEM_TRACER=1` uses `strace` on Linux when available.
+  `SHELLCTL_USE_SYSTEM_TRACER=1` uses `strace` on Linux when available.
   Use `--modes` to list files
   for four invocation modes: `login_interactive`, `login_noninteractive`,
   `nonlogin_interactive`, `nonlogin_noninteractive`.
@@ -125,7 +125,7 @@ Current implemented features (prototype)
   startup files are sourced and approximate time spent in each file.
   - Supports `bash`, `zsh`, and `tcsh` families.
   - Uses `BASH_XTRACEFD` + `PS4` for `bash` to capture timestamps; a patched
-    bash (`patches/bash-sourcetrace.patch`, `ENVCONFIG_BASH_PATH`) adds
+    bash (`patches/bash-sourcetrace.patch`, `SHELLCTL_BASH_PATH`) adds
     per-file `<sourcetrace>` lines like zsh’s `SOURCE_TRACE`.
   - Uses `-x` capture of stderr for `zsh`/`tcsh` and best-effort parsing.
   - Analyze results to compute per-file duration and percent of total.
@@ -136,17 +136,17 @@ Current implemented features (prototype)
 
 ## Configuration
 
-Global config: `/etc/env-config.toml` (optional)
-User config: `~/.env-config.toml` (optional)
+Global config: `/etc/shellctl.toml` (optional)
+User config: `~/.shellctl.toml` (optional)
 
 Generate a full site-wide defaults template (all keys):
 
 ```bash
-env-config config init-global --path ./config/env-config.global.defaults.toml
+shellctl config init-global --path ./config/shellctl.global.defaults.toml
 ```
 
 There is also a checked-in template at
-`config/env-config.global.defaults.toml`.
+`config/shellctl.global.defaults.toml`.
 
 Config keys of interest (example):
 
@@ -163,56 +163,48 @@ User level config overrides global ones.
 View all config keys and their current (merged) values:
 
 ```bash
-env-config config show
-env-config config show compose.paths   # show just one key's value
+shellctl config show
+shellctl config show compose.paths   # show just one key's value
 ```
 
 Get a single key:
 
 ```bash
-env-config config get trace.threshold_secs
+shellctl config get trace.threshold_secs
 # None
 ```
 
-Set a value in the user config (`~/.env-config.toml`):
+Set a value in the user config (`~/.shellctl.toml`):
 
 ```bash
 # float
-env-config config set trace.threshold_secs 0.05
+shellctl config set trace.threshold_secs 0.05
 
 # string
-env-config config set repo.url https://example.com/dotfiles.git
+shellctl config set repo.url https://example.com/dotfiles.git
 
 # clear a nullable key back to null
-env-config config set trace.threshold_secs null
+shellctl config set trace.threshold_secs null
 
 # list of strings (space-separated)
-env-config config set compose.paths /opt/shell-extras /usr/local/etc/env
+shellctl config set compose.paths /opt/shell-extras /usr/local/etc/env
 
 # append to an existing list instead of replacing it
-env-config config set compose.paths /another/path --append
-```
-
-Quick user-setting shortcut:
-
-```bash
-env-config settings trace.threshold_percent = 50
-env-config settings trace.threshold_secs=0.05
-env-config settings show
+shellctl config set compose.paths /another/path --append
 ```
 
 Reset a key (removes it from the user config, reverting to the
 global or default value):
 
 ```bash
-env-config config reset trace.threshold_percent
+shellctl config reset trace.threshold_percent
 ```
 
 Open the user config in `$EDITOR` with live validation (invalid
 edits are reverted automatically):
 
 ```bash
-env-config config --tui
+shellctl config --tui
 ```
 
 ## Backup, archive, and restore
@@ -220,47 +212,47 @@ env-config config --tui
 Back up discovered startup files to a tar.gz archive:
 
 ```bash
-env-config backup
-env-config backup --family zsh
-env-config backup --include ".zshrc" --include ".zprofile"
-env-config backup --exclude ".bash*"
+shellctl backup
+shellctl backup --family zsh
+shellctl backup --include ".zshrc" --include ".zprofile"
+shellctl backup --exclude ".bash*"
 ```
 
 Archive (backup + delete originals) — prompts for confirmation unless
 `--yes` is passed:
 
 ```bash
-env-config archive --family bash
-env-config archive --family bash --yes
+shellctl archive --family bash
+shellctl archive --family bash --yes
 ```
 
 List available backup archives:
 
 ```bash
-env-config list-backups
+shellctl list-backups
 ```
 
 Restore from the most recent archive (skips existing files by default):
 
 ```bash
-env-config restore
-env-config restore --force          # overwrite existing files
-env-config restore --archive 20260215   # match archive by substring
-env-config restore --include ".zshrc" --exclude ".zprofile"
-env-config restore --yes --force    # no confirmation, overwrite
+shellctl restore
+shellctl restore --force          # overwrite existing files
+shellctl restore --archive 20260215   # match archive by substring
+shellctl restore --include ".zshrc" --exclude ".zprofile"
+shellctl restore --yes --force    # no confirmation, overwrite
 ```
 
 Use `--tui` for interactive file selection (shows all shell families,
 active family highlighted and pre-checked):
 
 ```bash
-env-config backup --tui
-env-config archive --tui
-env-config restore --tui
+shellctl backup --tui
+shellctl archive --tui
+shellctl restore --tui
 ```
 
-Archives are stored in `~/.cache/env-config/backups/` by default.
-Override with the `ENVCONFIG_BACKUP_DIR` environment variable.
+Archives are stored in `~/.cache/shellctl/backups/` by default.
+Override with the `SHELLCTL_BACKUP_DIR` environment variable.
 
 Safety and notes
 

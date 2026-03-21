@@ -11,7 +11,7 @@ def test_backup_file_creates_timestamped_copy(tmp_path, monkeypatch):
     src.write_text("hello world")
 
     backup_dir = tmp_path / "backups"
-    monkeypatch.setenv("ENVCONFIG_BACKUP_DIR", str(backup_dir))
+    monkeypatch.setenv("SHELLCTL_BACKUP_DIR", str(backup_dir))
 
     ok = backup_file(str(src))
     assert ok is True
@@ -27,7 +27,7 @@ def test_disable_file_renames_and_backups(tmp_path, monkeypatch):
     src.write_text("config=1")
 
     backup_dir = tmp_path / "backups"
-    monkeypatch.setenv("ENVCONFIG_BACKUP_DIR", str(backup_dir))
+    monkeypatch.setenv("SHELLCTL_BACKUP_DIR", str(backup_dir))
 
     ok = disable_file(str(src))
     assert ok is True

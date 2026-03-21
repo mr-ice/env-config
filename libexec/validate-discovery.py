@@ -9,16 +9,16 @@ defaults). There are no CLI flags; run from the repo root.
 
 Usage (recommended — uses project venv and current sources):
 
-  cd /path/to/env-config
+  cd /path/to/shellctl
   uv run python libexec/validate-discovery.py
 
 Plain python3 (must see in-tree ``src/env_config``):
 
-  cd /path/to/env-config
+  cd /path/to/shellctl
   PYTHONPATH=src python3 libexec/validate-discovery.py
 
 If you only run ``python3`` without ``uv`` and without ``PYTHONPATH=src``,
-Python may import an older globally installed ``env-config`` and zsh
+Python may import an older globally installed ``shellctl`` and zsh
 results will not match current tracing.
 
 Requires shelltree/ (run libexec/refresh-shelltree.py first if needed).

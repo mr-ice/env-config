@@ -77,7 +77,7 @@ class TestEditorRestore:
         """After 'editing' produces invalid TOML, the original is restored."""
         from env_config.config import save_config
 
-        user_cfg = tmp_path / ".env-config.toml"
+        user_cfg = tmp_path / ".shellctl.toml"
         global_cfg = tmp_path / "global.toml"
         monkeypatch.setattr("env_config.config.user_config_path", lambda: user_cfg)
         monkeypatch.setattr("env_config.config.GLOBAL_CONFIG_PATH", global_cfg)
@@ -107,7 +107,7 @@ class TestEditorRestore:
         """After 'editing' produces valid TOML, the new content is kept."""
         from env_config.config import save_config
 
-        user_cfg = tmp_path / ".env-config.toml"
+        user_cfg = tmp_path / ".shellctl.toml"
         global_cfg = tmp_path / "global.toml"
         monkeypatch.setattr("env_config.config.user_config_path", lambda: user_cfg)
         monkeypatch.setattr("env_config.config.GLOBAL_CONFIG_PATH", global_cfg)

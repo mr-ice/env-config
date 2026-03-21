@@ -5,9 +5,9 @@ from env_config.trace import analyze_traces, parse_trace, run_shell_trace
 
 
 def test_run_shell_trace_uses_mock(monkeypatch, tmp_path):
-    """Test that run_shell_trace uses the mock trace data when ENVCONFIG_MOCK_TRACE_DIR is set."""
+    """Test run_shell_trace uses mock data with SHELLCTL_MOCK_TRACE_DIR."""
     fixtures = os.path.join(os.getcwd(), "tests", "fixtures", "traces")
-    monkeypatch.setenv("ENVCONFIG_MOCK_TRACE_DIR", fixtures)
+    monkeypatch.setenv("SHELLCTL_MOCK_TRACE_DIR", fixtures)
 
     raw = run_shell_trace("bash", args=["-l", "-c", "true"])
     assert "/home/testuser/.bash_profile" in raw or ".bashrc" in raw
@@ -22,9 +22,9 @@ def test_run_shell_trace_uses_mock(monkeypatch, tmp_path):
 
 
 def test_run_shell_trace_zsh_mock(monkeypatch):
-    """Test that run_shell_trace returns mock data for zsh when ENVCONFIG_MOCK_TRACE_DIR is set."""
+    """Test zsh mock traces with SHELLCTL_MOCK_TRACE_DIR."""
     fixtures = os.path.join(os.getcwd(), "tests", "fixtures", "traces")
-    monkeypatch.setenv("ENVCONFIG_MOCK_TRACE_DIR", fixtures)
+    monkeypatch.setenv("SHELLCTL_MOCK_TRACE_DIR", fixtures)
     raw = run_shell_trace("zsh", args=["-l", "-c", "true"])
     assert "zshenv" in raw or "zshrc" in raw or "zprofile" in raw
     parsed = parse_trace(raw, family="zsh")
@@ -33,9 +33,9 @@ def test_run_shell_trace_zsh_mock(monkeypatch):
 
 
 def test_run_shell_trace_tcsh_mock(monkeypatch):
-    """Test that run_shell_trace returns mock data for tcsh when ENVCONFIG_MOCK_TRACE_DIR is set."""
+    """Test tcsh mock traces with SHELLCTL_MOCK_TRACE_DIR."""
     fixtures = os.path.join(os.getcwd(), "tests", "fixtures", "traces")
-    monkeypatch.setenv("ENVCONFIG_MOCK_TRACE_DIR", fixtures)
+    monkeypatch.setenv("SHELLCTL_MOCK_TRACE_DIR", fixtures)
     raw = run_shell_trace("tcsh", args=["-l", "-c", "true"])
     assert "cshrc" in raw or "login" in raw
     parsed = parse_trace(raw, family="tcsh")

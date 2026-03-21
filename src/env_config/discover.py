@@ -18,7 +18,11 @@ import shutil
 from collections.abc import Iterable
 from pathlib import Path
 
-CACHE_DIR = Path(os.environ.get("ENVCONFIG_CACHE_DIR") or Path.home() / ".cache" / "env-config")
+CACHE_DIR = Path(
+    os.environ.get("SHELLCTL_CACHE_DIR")
+    or os.environ.get("ENVCONFIG_CACHE_DIR")
+    or Path.home() / ".cache" / "shellctl"
+)
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 

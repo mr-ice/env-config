@@ -1,4 +1,4 @@
-"""env-config package initialisation."""
+"""shellctl package initialisation."""
 
 __all__ = [
     "cli",

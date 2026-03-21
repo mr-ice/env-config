@@ -8,7 +8,7 @@ from env_config.cli import main
 @pytest.fixture()
 def _isolate(tmp_path, monkeypatch):
     """Redirect config paths to tmp_path so tests are hermetic."""
-    user_cfg = tmp_path / ".env-config.toml"
+    user_cfg = tmp_path / ".shellctl.toml"
     global_cfg = tmp_path / "global.toml"
     monkeypatch.setattr("env_config.config.user_config_path", lambda: user_cfg)
     monkeypatch.setattr("env_config.config.GLOBAL_CONFIG_PATH", global_cfg)
@@ -19,7 +19,7 @@ def _isolate(tmp_path, monkeypatch):
 
 
 class TestConfigShow:
-    """Tests for ``env-config config show``."""
+    """Tests for ``shellctl config show``."""
 
     def test_show_prints_all_keys(self, _isolate, capsys):
         rc = main(["config", "show"])
@@ -46,7 +46,7 @@ class TestConfigShow:
 
 
 class TestConfigGet:
-    """Tests for ``env-config config get``."""
+    """Tests for ``shellctl config get``."""
 
     def test_get_known_key(self, _isolate, capsys):
         rc = main(["config", "get", "trace.threshold_percent"])
@@ -69,7 +69,7 @@ class TestConfigGet:
 
 
 class TestConfigSet:
-    """Tests for ``env-config config set``."""
+    """Tests for ``shellctl config set``."""
 
     def test_set_valid_float(self, _isolate, capsys):
         rc = main(["config", "set", "trace.threshold_percent", "30"])
@@ -137,7 +137,7 @@ class TestConfigSet:
 
 
 class TestConfigReset:
-    """Tests for ``env-config config reset``."""
+    """Tests for ``shellctl config reset``."""
 
     def test_reset_reverts_to_default(self, _isolate, capsys):
         main(["config", "set", "trace.threshold_percent", "99"])
@@ -157,7 +157,7 @@ class TestConfigReset:
 
 
 class TestConfigNoSubcmd:
-    """Tests for ``env-config config`` with no sub-subcommand."""
+    """Tests for ``shellctl config`` with no sub-subcommand."""
 
     def test_prints_usage(self, _isolate, capsys):
         rc = main(["config"])
@@ -166,7 +166,7 @@ class TestConfigNoSubcmd:
 
 
 class TestConfigInitGlobal:
-    """Tests for ``env-config config init-global``."""
+    """Tests for ``shellctl config init-global``."""
 
     def test_writes_template(self, _isolate, tmp_path, capsys):
         out_path = tmp_path / "site.toml"
@@ -187,19 +187,3 @@ class TestConfigInitGlobal:
         assert "already exists" in capsys.readouterr().err
 
 
-class TestSettingsShortcut:
-    """Tests for ``env-config settings`` shortcut command."""
-
-    def test_settings_assignment_syntax(self, _isolate, capsys):
-        rc = main(["settings", "trace.threshold_percent", "=", "55"])
-        assert rc == 0
-        rc = main(["config", "get", "trace.threshold_percent"])
-        assert rc == 0
-        assert "55" in capsys.readouterr().out
-
-    def test_settings_key_equals_value_syntax(self, _isolate, capsys):
-        rc = main(["settings", "trace.threshold_secs=0.2"])
-        assert rc == 0
-        rc = main(["config", "get", "trace.threshold_secs"])
-        assert rc == 0
-        assert "0.2" in capsys.readouterr().out

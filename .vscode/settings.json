@@ -1,0 +1,13 @@
+{
+    "makefile.configureOnOpen": false,
+    "python.linting.enabled": true,
+    "python.linting.flake8Enabled": true,
+    "python.linting.flake8Args": [
+        "--max-line-length=100",
+        "--per-file-ignores=tests/*:D"
+    ],
+    "flake8.args": [
+        "--max-line-length=100",
+        "--per-file-ignores=tests/*:D"
+    ]
+}

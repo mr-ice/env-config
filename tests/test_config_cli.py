@@ -185,5 +185,3 @@ class TestConfigInitGlobal:
         rc = main(["config", "init-global", "--path", str(out_path)])
         assert rc == 1
         assert "already exists" in capsys.readouterr().err
-
-

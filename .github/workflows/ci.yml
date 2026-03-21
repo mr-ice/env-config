@@ -17,12 +17,15 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           # Pin ruff to match [dependency-groups] dev in pyproject.toml
-          pip install pytest pytest-cov "ruff==0.15.7"
+          pip install pytest pytest-cov "ruff==0.15.7" "uv==0.10.12"
       - name: Lint (ruff)
         run: |
           # check formatting and linting
           ruff format --check .
           ruff check .
+      - name: install shellctl
+        run: |
+          uv sync --dev
       - name: Run tests
         env:
           ENVCONFIG_MOCK_TRACE_DIR: ${{ github.workspace }}/tests/fixtures/traces
